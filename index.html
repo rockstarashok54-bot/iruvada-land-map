@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Iruvada Village Land Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+*{box-sizing:border-box}html,body,#map{height:100%;width:100%;margin:0}
+body{font-family:Arial,Helvetica,sans-serif;overflow:hidden}
+#map{position:absolute;inset:0}
+.topbar{position:absolute;z-index:1000;top:10px;left:10px;display:flex;gap:8px}
+.menuBtn{width:46px;height:46px;background:#fff;border:0;border-radius:12px;font-size:27px;box-shadow:0 2px 8px #0004}
+.gpsBtn{background:#1976d2;color:#fff;border:0;border-radius:12px;padding:11px 15px;font-size:15px;font-weight:700;box-shadow:0 2px 8px #0004}
+.panel{position:absolute;z-index:1100;top:66px;left:10px;width:min(335px,calc(100vw - 20px));background:#fff;border-radius:14px;padding:14px;box-shadow:0 3px 14px #0004;display:none;max-height:calc(100vh - 82px);overflow:auto}
+.panel.open{display:block}.panel h2{font-size:19px;margin:0 0 10px}.panel h3{font-size:16px;margin:16px 0 8px}.close{float:right;border:0;background:transparent;font-size:25px}
+.searchRow{display:flex;gap:7px;margin-bottom:8px}.searchRow input{min-width:0;flex:1;padding:11px;border:1px solid #bbb;border-radius:9px;font-size:16px}.searchRow button{padding:10px 12px;border:0;border-radius:9px;background:#1976d2;color:#fff;font-weight:700}
+.status{padding:9px;border-radius:9px;background:#eef8f0;color:#176b36;font-size:14px;margin-top:8px}.layerRow{display:flex;gap:8px;flex-wrap:wrap}.layerRow button{border:1px solid #ccc;background:#f7f7f7;border-radius:9px;padding:9px 11px}
+.help{font-size:13px;color:#667085;line-height:1.4;margin-top:12px}
+.lp-label{background:rgba(255,255,255,.9);border:1px solid rgba(0,0,0,.35);border-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,.3);color:#111827;font-size:11px;font-weight:800;padding:2px 4px;white-space:nowrap;text-align:center}
+.lp-label:before{display:none}
+.leaflet-popup-content{margin:12px 14px;min-width:220px}.popup-title{font-size:20px;font-weight:800;margin-bottom:10px}.popup-row{margin:6px 0;line-height:1.3}.popup-label{font-weight:700}
+.legend{position:absolute;z-index:1000;right:10px;bottom:20px;background:#fff;padding:8px 10px;border-radius:9px;box-shadow:0 2px 8px #0003;font-size:12px}.sw{display:inline-block;width:18px;height:4px;vertical-align:middle;margin-right:5px}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="topbar">
+  <button id="menuBtn" class="menuBtn" aria-label="Menu">☰</button>
+  <button id="gpsBtn" class="gpsBtn">📍 Find My Land</button>
+</div>
+<div id="panel" class="panel">
+  <button id="closeBtn" class="close">×</button>
+  <h2>🌾 Iruvada Village Land Map</h2>
+
+  <h3>Search LP Number</h3>
+  <div class="searchRow"><input id="lpInput" inputmode="numeric" placeholder="Exact LP number"><button id="lpSearch">Search</button></div>
+
+  <h3>Search Khata Number</h3>
+  <div class="searchRow"><input id="khataInput" inputmode="numeric" placeholder="Khata number"><button id="khataSearch">Search</button></div>
+
+  <h3>Search Survey Number</h3>
+  <div class="searchRow"><input id="surveyInput" placeholder="Example: 41-3"><button id="surveySearch">Search</button></div>
+
+  <div id="status" class="status">Tap a parcel to view its details.</div>
+
+  <h3>Map Layers</h3>
+  <div class="layerRow">
+    <button id="satBtn">🛰️ Satellite</button>
+    <button id="osmBtn">🗺️ OSM</button>
+    <button id="clearBtn">Clear Highlights</button>
+  </div>
+
+  <div class="help">
+    LP search is exact. Khata search highlights all LPs with that Khata. Survey search highlights all LPs containing that survey number. LP labels appear when zoomed in. Parcel details appear only after tapping a parcel.
+  </div>
+</div>
+<div class="legend"><div><span class="sw" style="background:#0878ff"></span>LP boundary</div><div><span class="sw" style="background:#ff1f1f"></span>Selected</div></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const map=L.map('map',{zoomControl:true,preferCanvas:true}).setView([18.575,83.549],15);
+const osm=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:22,attribution:'&copy; OpenStreetMap contributors'});
+const sat=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:22,attribution:'Tiles &copy; Esri'});
+sat.addTo(map);
+
+let landLayer=null,selectedLayers=[],gpsDot=null,gpsAccuracy=null;
+const blue={color:'#0878ff',weight:2.1,opacity:.95,fillColor:'#0878ff',fillOpacity:.025};
+const red={color:'#ff1f1f',weight:4,opacity:1,fillColor:'#ff1f1f',fillOpacity:.08};
+
+function val(x){return x==null?'':String(x).trim()}
+function norm(x){return val(x).toLowerCase().replace(/\s+/g,' ').trim()}
+function esc(s){return val(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+
+function popupHtml(p){
+ const rows=[
+  ['Village',p.Village],['Survey No.',p.Survey_No],['Extent',p.Extent],
+  ['Land Nature',p.Land_Nature],['Classification',p.Land_Classification],
+  ['Khata No.',p.Khata_No],['Pattadar',p.Pattadar],['Father/Husband',p.Father_Husband]
+ ];
+ return '<div class="popup-title">LP No. '+esc(p.LPNo||p.lpm)+'</div>'+
+ rows.map(r=>'<div class="popup-row"><span class="popup-label">'+esc(r[0])+':</span> '+esc(r[1])+'</div>').join('');
+}
+function clearHighlights(){selectedLayers.forEach(l=>l.setStyle(blue));selectedLayers=[]}
+function selectLayers(arr,zoom){
+ clearHighlights();selectedLayers=arr;arr.forEach(l=>l.setStyle(red));
+ if(zoom&&arr.length){map.fitBounds(L.featureGroup(arr).getBounds().pad(.12))}
+}
+
+function updateLPLabels(){
+ if(!landLayer)return;
+ const show=map.getZoom()>=17;
+ landLayer.eachLayer(l=>{
+   if(!l.getTooltip())return;
+   if(show)l.openTooltip();else l.closeTooltip();
+ });
+}
+function loadLand(){
+ fetch('land.geojson').then(r=>{if(!r.ok)throw Error('land.geojson could not be loaded');return r.json()})
+ .then(g=>{
+   landLayer=L.geoJSON(g,{style:()=>({...blue}),onEachFeature:(f,l)=>{
+     const p=f.properties||{},lp=val(p.LPNo||p.lpm);
+     l.bindPopup(popupHtml(p),{closeButton:true,autoPan:true});
+     if(lp)l.bindTooltip('LP '+esc(lp),{permanent:true,direction:'center',className:'lp-label',opacity:1,interactive:false});
+     l.on('click',()=>selectLayers([l],false));
+   }}).addTo(map);
+   const b=landLayer.getBounds();if(b.isValid())map.fitBounds(b.pad(.04));
+   setTimeout(updateLPLabels,300);
+ }).catch(e=>{console.error(e);alert('Land boundary data could not be loaded. Keep index.html and land.geojson together.')});
+}
+map.on('zoomend',updateLPLabels);
+
+function exactLP(p,q){return norm(p.LPNo||p.lpm)===norm(q)}
+function exactKhata(p,q){return norm(p.Khata_No)===norm(q)}
+function surveyMatches(p,q){
+ const t=norm(q),raw=norm(p.Survey_No);if(!t||!raw)return false;
+ return raw.split(/[,;/]+/).map(x=>x.trim()).filter(Boolean).includes(t);
+}
+function runSearch(type){
+ const input=val(document.getElementById(type+'Input').value);
+ if(!input){document.getElementById('status').textContent='Please enter a value.';return}
+ const found=[];
+ landLayer.eachLayer(l=>{
+   const p=l.feature.properties||{};
+   const ok=type==='lp'?exactLP(p,input):type==='khata'?exactKhata(p,input):surveyMatches(p,input);
+   if(ok)found.push(l);
+ });
+ if(!found.length){clearHighlights();document.getElementById('status').textContent='No matching LP found.';return}
+ selectLayers(found,true);
+ document.getElementById('status').textContent=type==='lp'?'Exact LP found. Tap the red parcel to view details.':found.length+' LP(s) found. Tap a red parcel to view details.';
+}
+document.getElementById('menuBtn').onclick=()=>document.getElementById('panel').classList.toggle('open');
+document.getElementById('closeBtn').onclick=()=>document.getElementById('panel').classList.remove('open');
+document.getElementById('lpSearch').onclick=()=>runSearch('lp');
+document.getElementById('khataSearch').onclick=()=>runSearch('khata');
+document.getElementById('surveySearch').onclick=()=>runSearch('survey');
+document.getElementById('clearBtn').onclick=()=>{clearHighlights();document.getElementById('status').textContent='Highlights cleared.'};
+document.getElementById('satBtn').onclick=()=>{sat.addTo(map);if(map.hasLayer(osm))map.removeLayer(osm)};
+document.getElementById('osmBtn').onclick=()=>{osm.addTo(map);if(map.hasLayer(sat))map.removeLayer(sat)};
+
+function pointInRing(x,y,ring){
+ let inside=false;
+ for(let i=0,j=ring.length-1;i<ring.length;j=i++){
+  const xi=ring[i][0],yi=ring[i][1],xj=ring[j][0],yj=ring[j][1];
+  const hit=((yi>y)!=(yj>y))&&(x<(xj-xi)*(y-yi)/(yj-yi)+xi);
+  if(hit)inside=!inside;
+ }
+ return inside;
+}
+function polyContains(coords,x,y){
+ if(!coords||!coords.length||!pointInRing(x,y,coords[0]))return false;
+ for(let i=1;i<coords.length;i++)if(pointInRing(x,y,coords[i]))return false;
+ return true;
+}
+function contains(feature,x,y){
+ const g=feature.geometry;if(!g)return false;
+ if(g.type==='Polygon')return polyContains(g.coordinates,x,y);
+ if(g.type==='MultiPolygon')return g.coordinates.some(p=>polyContains(p,x,y));
+ return false;
+}
+function findGPS(){
+ if(!navigator.geolocation){document.getElementById('status').textContent='GPS is not supported.';return}
+ document.getElementById('status').textContent='Getting your GPS location...';
+ navigator.geolocation.getCurrentPosition(pos=>{
+  const lat=pos.coords.latitude,lon=pos.coords.longitude,acc=pos.coords.accuracy||0;
+  if(gpsDot)map.removeLayer(gpsDot);if(gpsAccuracy)map.removeLayer(gpsAccuracy);
+  gpsAccuracy=L.circle([lat,lon],{radius:acc,color:'#1976d2',weight:1,fillColor:'#1976d2',fillOpacity:.08,interactive:false}).addTo(map);
+  gpsDot=L.circleMarker([lat,lon],{radius:8,color:'#fff',weight:3,fillColor:'#1976ff',fillOpacity:1,interactive:false}).addTo(map);
+  const found=[];
+  landLayer.eachLayer(l=>{if(l.feature&&contains(l.feature,lon,lat))found.push(l)});
+  if(found.length){selectLayers(found,true);document.getElementById('status').textContent='Land found. Accuracy about '+Math.round(acc)+' m. Tap the red parcel to view details.'}
+  else{document.getElementById('status').textContent='GPS received, but no LP contains your location.';map.setView([lat,lon],Math.max(map.getZoom(),17))}
+ },err=>{document.getElementById('status').textContent='GPS error: '+err.message},{enableHighAccuracy:true,timeout:15000,maximumAge:5000});
+}
+document.getElementById('gpsBtn').onclick=findGPS;
+loadLand();
+</script>
+</body></html>
