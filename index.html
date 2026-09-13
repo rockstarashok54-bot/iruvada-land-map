@@ -21,6 +21,37 @@
 .search{display:flex;gap:7px}.search input{min-width:0;flex:1;padding:10px 11px;border:1px solid #cbd3de;border-radius:9px;font-size:14px;outline:none}.search input:focus{border-color:#1478e8;box-shadow:0 0 0 3px rgba(20,120,232,.12)}.search button{border:0;border-radius:9px;padding:10px 13px;background:#1478e8;color:#fff;font-size:13px;font-weight:800;cursor:pointer}
 .status{margin-top:8px;padding:8px 9px;border-radius:9px;background:#f3f7fb;color:#536174;font-size:12px;line-height:1.35}.status.ok{background:#eaf8ef;color:#1d6a39}.status.err{background:#fff0f0;color:#a22929}
 .layer-row{display:flex;align-items:center;gap:8px;padding:6px 0;font-size:14px}.layer-row input{width:17px;height:17px;accent-color:#1478e8}
+.lp-label{
+  background:rgba(255,255,255,.85);
+  border:1px solid rgba(0,0,0,.35);
+  border-radius:4px;
+  box-shadow:0 1px 3px rgba(0,0,0,.25);
+  color:#111827;
+  font-size:11px;
+  font-weight:800;
+  padding:2px 4px;
+  white-space:nowrap;
+  text-align:center;
+}
+.lp-label:before{
+  display:none;
+}
+.lp-label{
+  background:rgba(255,255,255,.85);
+  border:1px solid rgba(0,0,0,.35);
+  border-radius:4px;
+  box-shadow:0 1px 3px rgba(0,0,0,.25);
+  color:#111827;
+  font-size:11px;
+  font-weight:800;
+  padding:2px 4px;
+  white-space:nowrap;
+  text-align:center;
+}
+
+.lp-label:before{
+  display:none;
+} 
 .legend{display:flex;align-items:center;gap:7px;font-size:12px;color:#667085;margin-top:7px}.blue-line{width:25px;border-top:3px solid #0878ff}.red-line{width:25px;border-top:4px solid #ff1f1f}
 .about{font-size:11px;color:#718096;line-height:1.4}.leaflet-popup-content-wrapper{border-radius:12px}.leaflet-popup-content{margin:13px 15px;min-width:220px;max-width:290px}.popup h3{margin:0 0 8px;font-size:18px}.popup-row{margin:4px 0;font-size:13px;line-height:1.35}.popup-row b{font-weight:750}.popup-note{font-size:11px;color:#6b7280;margin-top:8px;border-top:1px solid #eee;padding-top:7px}.leaflet-control-zoom{margin-top:70px!important}
 @media(max-width:700px){.topbar{top:8px;left:8px;right:8px}.icon-btn,.gps-btn{height:46px}.icon-btn{width:46px}.gps-btn{font-size:13px;padding:0 12px}.menu{top:62px;left:8px;width:calc(100vw - 16px);max-height:calc(100vh - 72px)}}
@@ -67,7 +98,96 @@ function val(x){return x===undefined||x===null||x===''||x==='#N/A'?'—':String(
 function popupHtml(p){return `<div class="popup"><h3>LP No. ${val(p.LPNo||p.lpm)}</h3><div class="popup-row"><b>Survey No.:</b> ${val(p.Survey_No)}</div><div class="popup-row"><b>Extent:</b> ${val(p.Extent)}</div><div class="popup-row"><b>Land Nature:</b> ${val(p.Land_Nature)}</div><div class="popup-row"><b>Classification:</b> ${val(p.Land_Classification)}</div><div class="popup-row"><b>Khata No.:</b> ${val(p.Khata_No)}</div><div class="popup-row"><b>Pattadar:</b> ${val(p.Pattadar)}</div><div class="popup-row"><b>Father/Husband:</b> ${val(p.Father_Husband)}</div><div class="popup-note">Official source: AP BhuNaksha link is stored for this LP.</div></div>`}
 function clearHighlights(){selectedLayers.forEach(l=>l.setStyle(blue));selectedLayers=[]}
 function highlight(featuresToHighlight,fit=true){clearHighlights();const targets=[];featuresToHighlight.forEach(f=>{landLayer.eachLayer(l=>{if(l.feature===f){l.setStyle(red);targets.push(l)}})});selectedLayers=targets;if(fit&&targets.length){let group=L.featureGroup(targets);const b=group.getBounds();if(b.isValid())map.fitBounds(b.pad(.25),{maxZoom:18,animate:true})}}
-function loadLand(){fetch('land.geojson').then(r=>{if(!r.ok)throw new Error('land.geojson could not be loaded');return r.json()}).then(g=>{features=g.features||[];loaded=true;landLayer=L.geoJSON(g,{style:blue,onEachFeature:(f,l)=>{l.bindPopup(popupHtml(f.properties||{}),{closeButton:true,autoPan:true});l.on('click',()=>{clearHighlights();l.setStyle(red);selectedLayers=[l]})}}).addTo(map);const b=landLayer.getBounds();if(b.isValid())map.fitBounds(b.pad(.04))}).catch(e=>{console.error(e);alert('Land boundary data could not be loaded. Make sure index.html and land.geojson are in the same GitHub Pages folder.')})}
+function loadLand(){
+  fetch('land.geojson')
+    .then(r=>{
+      if(!r.ok) throw new Error('land.geojson could not be loaded');
+      return r.json();
+    })
+    .then(g=>{
+      features=g.features||[];
+      loaded=true;
+
+      landLayer=L.geoJSON(g,{
+        style:blue,
+
+        onEachFeature:(f,l)=>{
+          const p=f.properties||{};
+          const lp=val(p.LPNo||p.lpm);
+
+          // Normal popup with land details
+          l.bindPopup(
+            popupHtml(p),
+            {
+              closeButton:true,
+              autoPan:true
+            }
+          );
+
+          // LP number label
+          if(lp){
+            l.bindTooltip(
+              'LP ' + lp,
+              {
+                permanent:true,
+                direction:'center',
+                className:'lp-label',
+                opacity:1,
+                interactive:false
+              }
+            );
+          }
+
+          // Click parcel = highlight + show details
+          l.on('click',()=>{
+            clearHighlights();
+            l.setStyle(red);
+            selectedLayers=[l];
+          });
+        }
+      }).addTo(map);
+
+      const b=landLayer.getBounds();
+
+      if(b.isValid()){
+        map.fitBounds(b.pad(.04));
+      }
+
+      // Show/hide LP numbers according to zoom level
+      setTimeout(updateLPLabels,500);
+    })
+    .catch(e=>{
+      console.error(e);
+      alert(
+        'Land boundary data could not be loaded. Make sure index.html and land.geojson are in the same GitHub Pages folder.'
+      );
+    });
+}
+
+
+// LP number visibility
+function updateLPLabels(){
+  if(!landLayer) return;
+
+  const showLabels = map.getZoom() >= 17;
+
+  landLayer.eachLayer(l=>{
+    if(l.getTooltip()){
+      if(showLabels){
+        l.openTooltip();
+      }else{
+        l.closeTooltip();
+      }
+    }
+  });
+}
+
+
+// Update labels whenever the user zooms
+map.on('zoomend',updateLPLabels);
+
+
+// Load land
 loadLand();
 function fieldValue(p,type){if(type==='lp')return [p.LPNo,p.lpm];if(type==='khata')return [p.Khata_No];return [p.Survey_No]}
 function search(){const q=document.getElementById('q').value.trim().toLowerCase();const s=document.getElementById('searchStatus');if(!q){s.style.display='block';s.className='status err';s.textContent='Enter a number to search.';return}if(!loaded){s.style.display='block';s.className='status';s.textContent='Loading land boundaries…';return}
