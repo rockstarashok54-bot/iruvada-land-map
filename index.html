@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Iruvada Village Land Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script src="https://cdn.jsdelivr.net/npm/@turf/turf@7/turf.min.js"></script>
+<style>
+*{box-sizing:border-box}html,body,#map{height:100%;margin:0}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#172033;overflow:hidden}
+#map{position:fixed;inset:0;background:#e9edf2}
+.app{position:fixed;z-index:1000;top:14px;left:14px;width:min(350px,calc(100vw - 28px));max-height:calc(100vh - 28px);overflow:auto}
+.card{background:rgba(255,255,255,.96);backdrop-filter:blur(8px);border:1px solid #dce2ea;border-radius:14px;box-shadow:0 8px 28px rgba(0,0,0,.15);padding:14px;margin-bottom:10px}
+.brand{display:flex;align-items:center;gap:10px}.logo{font-size:32px}.title{font-weight:800;font-size:21px;line-height:1.15}.sub{font-size:12px;color:#5f6b7a;margin-top:3px}
+.section-title{font-weight:750;font-size:16px;margin-bottom:10px;display:flex;align-items:center;gap:8px}.layer{display:flex;align-items:center;gap:9px;padding:7px 0;font-size:14px;cursor:pointer}.layer input{width:18px;height:18px;margin:0;accent-color:#1478e8}.swatch{width:18px;height:18px;border:2px solid #0878ff;background:rgba(0,0,0,0);border-radius:2px}
+.search{display:flex;gap:7px}.search input{min-width:0;flex:1;padding:11px 12px;border:1px solid #cbd3de;border-radius:10px;font-size:15px;outline:none}.search input:focus{border-color:#1478e8;box-shadow:0 0 0 3px rgba(20,120,232,.12)}button{border:0;border-radius:10px;padding:10px 13px;background:#1478e8;color:#fff;font-size:14px;font-weight:700;cursor:pointer}button.secondary{background:#fff;color:#172033;border:1px solid #cbd3de}button:active{transform:translateY(1px)}
+.gps{width:100%;margin-top:9px;background:#fff;color:#172033;border:1px solid #cbd3de}.status{margin-top:9px;padding:9px 10px;border-radius:9px;background:#f3f7fb;color:#536174;font-size:12px}.status.ok{background:#eaf8ef;color:#1d6a39}.status.err{background:#fff0f0;color:#a22929}
+.help{font-size:12px;line-height:1.45;color:#647083}.about{font-size:11px;color:#718096;line-height:1.4}.leaflet-popup-content-wrapper{border-radius:12px}.leaflet-popup-content{margin:13px 15px;min-width:220px;max-width:290px}.popup h3{margin:0 0 8px;font-size:18px}.popup-row{margin:4px 0;font-size:13px;line-height:1.35}.popup-row b{font-weight:750}.popup-note{font-size:11px;color:#6b7280;margin-top:8px;border-top:1px solid #eee;padding-top:7px}.leaflet-control-layers{border-radius:10px!important}.leaflet-control-zoom a{font-weight:700}
+@media(max-width:700px){.app{top:8px;left:8px;width:min(390px,calc(100vw - 16px));max-height:56vh}.card{padding:11px;border-radius:12px;margin-bottom:7px}.title{font-size:19px}.logo{font-size:27px}.card.layers-card{display:none}.brand{gap:8px}.sub{display:none}.search input{font-size:14px}.leaflet-popup-content{min-width:190px;max-width:260px}}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="app">
+  <div class="card">
+    <div class="brand"><div class="logo">🌾</div><div><div class="title">Iruvada Village Land Map</div><div class="sub">View land boundaries, search by LP / Survey / Khata and find your land</div></div></div>
+  </div>
+  <div class="card layers-card">
+    <div class="section-title">🗺️ Map Layers</div>
+    <label class="layer"><input type="radio" name="base" value="osm"> <span>OpenStreetMap</span></label>
+    <label class="layer"><input type="radio" name="base" value="sat" checked> <span>Satellite imagery</span></label>
+    <label class="layer"><input type="checkbox" id="boundaries" checked> <span class="swatch"></span><span>Land Boundaries (LP)</span></label>
+  </div>
+  <div class="card">
+    <div class="section-title">🔎 Search LP / Survey / Khata</div>
+    <div class="search"><input id="q" placeholder="Enter LP / Survey / Khata" autocomplete="off"><button id="searchBtn">Search</button></div>
+    <div id="searchStatus" class="status" style="display:none"></div>
+  </div>
+  <div class="card">
+    <div class="section-title">📍 Find My Land</div>
+    <button id="gps" class="gps">🎯 Enable GPS</button>
+    <div id="gpsStatus" class="status">Blue dot = your GPS location. Red boundary = your matching LP. Tap any LP boundary to open its details.</div>
+  </div>
+  <div class="card about">Iruvada Village Land Map<br>For public use (UNOFFICIAL). Land-record details shown by this map are based on the available dataset; the official source remains AP BhuNaksha.</div>
+</div>
+<script>
+const map=L.map('map',{zoomControl:true,preferCanvas:true}).setView([18.5748,83.5485],16);
+const osm=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:20,attribution:'&copy; OpenStreetMap contributors'});
+const sat=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:20,attribution:'Tiles &copy; Esri'});
+sat.addTo(map);
+let landLayer=null, features=[], loaded=false;
+let selectedLayer=null;
+let gpsDot=null, gpsAccuracy=null;
+const blue={color:'#0878ff',weight:2.2,opacity:.95,fillColor:'#0878ff',fillOpacity:.025};
+function popupHtml(p){
+ const val=(x)=>x===undefined||x===null||x===''||x==='#N/A'?'—':String(x);
+ return `<div class="popup"><h3>LP No. ${val(p.LPNo||p.lpm)}</h3>
+ <div class="popup-row"><b>Survey No.:</b> ${val(p.Survey_No)}</div>
+ <div class="popup-row"><b>Extent:</b> ${val(p.Extent)}</div>
+ <div class="popup-row"><b>Land Nature:</b> ${val(p.Land_Nature)}</div>
+ <div class="popup-row"><b>Classification:</b> ${val(p.Land_Classification)}</div>
+ <div class="popup-row"><b>Khata No.:</b> ${val(p.Khata_No)}</div>
+ <div class="popup-row"><b>Pattadar:</b> ${val(p.Pattadar)}</div>
+ <div class="popup-row"><b>Father/Husband:</b> ${val(p.Father_Husband)}</div>
+ <div class="popup-note">Official source: AP BhuNaksha link is stored for this LP.</div></div>`;
+}
+function loadLand(){
+ fetch('land.geojson').then(r=>{if(!r.ok)throw new Error('land.geojson could not be loaded');return r.json()}).then(g=>{
+   features=g.features||[]; loaded=true;
+   landLayer=L.geoJSON(g,{style:blue,onEachFeature:(f,l)=>{
+     l.bindPopup(popupHtml(f.properties||{}),{closeButton:true,autoPan:true});
+     l.on('click',()=>selectParcelLayer(l));
+   }}).addTo(map);
+   const b=landLayer.getBounds(); if(b.isValid()) map.fitBounds(b.pad(.04));
+ }).catch(e=>{console.error(e);alert('Land boundary data could not be loaded. Make sure index.html and land.geojson are in the same GitHub Pages folder.');});
+}
+loadLand();
+function selectParcelLayer(layer){
+  if(selectedLayer && selectedLayer!==layer) selectedLayer.setStyle(blue);
+  selectedLayer=layer;
+  layer.setStyle({color:'#ff1f1f',weight:4,opacity:1,fillColor:'#ff1f1f',fillOpacity:.08});
+}
+function openFeature(f, center, showPopup=false){
+ if(!f||!f.geometry)return;
+ let target=null;
+ landLayer.eachLayer(l=>{if(l.feature===f)target=l});
+ if(!target)return;
+ selectParcelLayer(target);
+ if(center){const b=target.getBounds(); if(b.isValid()) map.fitBounds(b.pad(.35),{maxZoom:18,animate:true});}
+ if(showPopup) target.openPopup();
+}
+function search(){
+ const q=document.getElementById('q').value.trim().toLowerCase(); const s=document.getElementById('searchStatus');
+ if(!q){s.style.display='block';s.className='status err';s.textContent='Enter an LP number, Survey number or Khata number.';return;}
+ if(!loaded){s.style.display='block';s.className='status';s.textContent='Loading land boundaries…';return;}
+ const f=features.find(x=>{const p=x.properties||{}; return [p.LPNo,p.lpm,p.Survey_No,p.Khata_No].some(v=>v!=null&&String(v).toLowerCase().includes(q));});
+ if(!f){s.style.display='block';s.className='status err';s.textContent='No matching land parcel found.';return;}
+ s.style.display='block';s.className='status ok';s.textContent='Parcel found. Tap the red boundary to open details.';openFeature(f,true,false);
+}
+document.getElementById('searchBtn').onclick=search;document.getElementById('q').addEventListener('keydown',e=>{if(e.key==='Enter')search()});
+document.querySelectorAll('input[name="base"]').forEach(r=>r.addEventListener('change',e=>{if(e.target.value==='osm'){map.removeLayer(sat);osm.addTo(map)}else{map.removeLayer(osm);sat.addTo(map)}}));
+document.getElementById('boundaries').addEventListener('change',e=>{if(!landLayer)return;e.target.checked?landLayer.addTo(map):map.removeLayer(landLayer)});
+function gps(){
+ const s=document.getElementById('gps'); const st=document.getElementById('gpsStatus');
+ if(!window.isSecureContext){st.className='status err';st.textContent='GPS requires the HTTPS GitHub Pages website. Open the github.io address, not a local file.';return;}
+ if(!navigator.geolocation){st.className='status err';st.textContent='This browser does not support GPS location.';return;}
+ s.disabled=true;s.textContent='Getting GPS…';st.className='status';st.textContent='Requesting your location…';
+ navigator.geolocation.getCurrentPosition(pos=>{
+   const lat=pos.coords.latitude,lon=pos.coords.longitude,acc=Math.round(pos.coords.accuracy);
+   s.disabled=false;s.textContent='🎯 Find My Land Again';
+   if(!loaded){st.textContent='GPS received. Waiting for land boundaries to load…';return;}
+   const pt=turf.point([lon,lat]); let found=null;
+   for(const f of features){try{if(f.geometry && turf.booleanPointInPolygon(pt,f)) {found=f;break}}catch(e){}}
+   map.setView([lat,lon],18,{animate:true});
+   if(gpsAccuracy) map.removeLayer(gpsAccuracy);
+   if(gpsDot) map.removeLayer(gpsDot);
+   gpsAccuracy=L.circle([lat,lon],{radius:acc,color:'#1976ff',weight:1,opacity:.55,fillColor:'#1976ff',fillOpacity:.08,interactive:false}).addTo(map);
+   gpsDot=L.circleMarker([lat,lon],{radius:8,color:'#ffffff',weight:3,fillColor:'#1976ff',fillOpacity:1,interactive:false}).addTo(map);
+   if(found){st.className='status ok';st.textContent=`Land found. GPS accuracy approximately ${acc} m. Tap the red boundary to open details.`;openFeature(found,false,false);}
+   else{st.className='status err';st.textContent=`GPS accuracy approximately ${acc} m, but no parcel boundary contains your position.`;}
+ },err=>{s.disabled=false;s.textContent='🎯 Enable GPS';st.className='status err';if(err.code===1)st.textContent='Location permission was denied. Allow Location for this HTTPS site in Chrome settings, then try again.';else if(err.code===2)st.textContent='Location unavailable. Check GPS/location services and try again.';else st.textContent='GPS request timed out. Try again outdoors.';},{enableHighAccuracy:true,timeout:20000,maximumAge:0});
+}
+document.getElementById('gps').onclick=gps;
+</script>
+</body>
+</html>
